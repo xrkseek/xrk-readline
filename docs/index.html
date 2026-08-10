@@ -9,49 +9,21 @@
     @media (prefers-color-scheme: light) {
       :root { --fg: #1a1a1a; --muted: #5c5c5c; --bg: #f4f2ef; --card: #fff; --acc: #0f766e; --code: #f0f0f0; }
     }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.55; }
-    main { max-width: 40rem; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
-    h1 { font-size: 1.75rem; letter-spacing: -0.02em; margin: 0 0 0.5rem; }
-    p { color: var(--muted); margin: 0 0 1.25rem; }
-    .card { background: var(--card); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1rem 0; }
-    .card h2 { font-size: 0.95rem; margin: 0 0 0.65rem; color: var(--acc); }
-    pre { margin: 0; padding: 0.85rem 1rem; background: var(--code); border-radius: 8px; overflow-x: auto; font-size: 0.82rem; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+    main { max-width: 36rem; margin: 0 auto; padding: 3rem 1.25rem; }
+    h1 { margin: 0 0 0.35rem; font-size: 1.75rem; }
+    p { color: var(--muted); }
+    pre { padding: 1rem 1.1rem; background: var(--code); border-radius: 10px; font-size: 1.05rem; }
     code { font-family: ui-monospace, Consolas, monospace; }
     a { color: var(--acc); }
-    .note { font-size: 0.85rem; color: var(--muted); }
   </style>
 </head>
 <body>
   <main>
     <h1>xrk-readline</h1>
-    <p>轻量 readline：C 控制台 + Python 编辑器。Pages 只放说明；安装请用 pip / git。</p>
-
-    <div class="card">
-      <h2>正式 pip 源（PyPI，发布后）</h2>
-      <pre><code>pip install xrk-readline</code></pre>
-    </div>
-
-    <div class="card">
-      <h2>尚未上 PyPI 时：从 GitHub 拉</h2>
-      <pre><code>pip install "git+https://github.com/sunflowermm/xrk-readline.git"</code></pre>
-    </div>
-
-    <div class="card">
-      <h2>SSH</h2>
-      <pre><code>pip install "git+ssh://git@github.com/sunflowermm/xrk-readline.git"</code></pre>
-    </div>
-
-    <div class="card">
-      <h2>钉标签</h2>
-      <pre><code>pip install "git+https://github.com/sunflowermm/xrk-readline.git@v0.2.0"</code></pre>
-    </div>
-
-    <p class="note">
-      GitHub Pages <strong>不是</strong> PyPI：不能 <code>pip install</code> 一个 Pages 网址当包源。
-      源码与 Issue：
-      <a href="https://github.com/sunflowermm/xrk-readline">github.com/sunflowermm/xrk-readline</a>
-    </p>
+    <p>安装（PyPI）：</p>
+    <pre><code>pip install xrk-readline</code></pre>
+    <p><a href="https://github.com/sunflowermm/xrk-readline">GitHub</a></p>
   </main>
 </body>
 </html>

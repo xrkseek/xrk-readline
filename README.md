@@ -7,23 +7,16 @@
 
 ## 安装
 
-### PyPI（正式 pip 源，发布后）
-
 ```bash
 pip install xrk-readline
-# 或
-uv pip install xrk-readline
 ```
 
-```toml
-# pyproject.toml
-dependencies = ["xrk-readline>=0.2.0"]
-```
+（发到 PyPI 后即可用上面这行。怎么发：见下方「发布到 PyPI」。）
 
-### 还没上 PyPI 时：从 Git 拉
+临时从仓库装（会比较长）：
 
 ```bash
-pip install "git+https://github.com/sunflowermm/xrk-readline.git"
+pip install git+https://github.com/sunflowermm/xrk-readline.git
 ```
 
 ## 发布到 PyPI（你要当 pip 源时做这些）
