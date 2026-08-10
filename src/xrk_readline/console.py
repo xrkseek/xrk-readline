@@ -61,20 +61,4 @@ class NativeConsole:
         if item is None:
             return None
         kind, ch = item
-        # 与 Key 常量对齐
-        mapping = {
-            "enter": Key.ENTER,
-            "backspace": Key.BACKSPACE,
-            "delete": Key.DELETE,
-            "left": Key.LEFT,
-            "right": Key.RIGHT,
-            "up": Key.UP,
-            "down": Key.DOWN,
-            "home": Key.HOME,
-            "end": Key.END,
-            "tab": Key.TAB,
-            "ctrl_c": Key.CTRL_C,
-            "ctrl_d": Key.CTRL_D,
-            "char": Key.CHAR,
-        }
-        return KeyEvent(mapping.get(kind, Key.CHAR), ch or "")
+        return KeyEvent(kind if kind else Key.CHAR, ch or "")

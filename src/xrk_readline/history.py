@@ -1,4 +1,4 @@
-"""历史记录。"""
+"""历史记录：上下键在草稿与条目间来回切换。"""
 
 from __future__ import annotations
 
@@ -7,11 +7,17 @@ from typing import List, Optional
 
 
 class History:
+    """
+    索引模型：``_idx`` ∈ [0, len(items)]，``_idx == len`` 表示当前草稿。
+    上下键只移动索引；到头/到尾再按返回 None（缓冲区不变）。
+    """
+
     def __init__(self, max_len: int = 500) -> None:
         self._max = max(1, int(max_len))
         self._items: List[str] = []
-        self._cursor: Optional[int] = None  # None = 当前编辑行
-        self._stash: str = ""
+        self._idx: int = 0
+        self._draft: str = ""
+        self._nav: bool = False
 
     def __len__(self) -> int:
         return len(self._items)
@@ -20,49 +26,46 @@ class History:
         self._max = max(1, int(n))
         if len(self._items) > self._max:
             self._items = self._items[-self._max :]
+        self.reset_nav()
+
+    def reset_nav(self) -> None:
+        """结束浏览，回到草稿槽（不改 items）。"""
+        self._nav = False
+        self._draft = ""
+        self._idx = len(self._items)
 
     def add(self, line: str) -> None:
         text = (line or "").rstrip("\r\n")
-        if not text:
-            return
-        if self._items and self._items[-1] == text:
-            self._cursor = None
-            self._stash = ""
-            return
-        self._items.append(text)
-        if len(self._items) > self._max:
-            self._items = self._items[-self._max :]
-        self._cursor = None
-        self._stash = ""
-
-    def begin_nav(self, current: str) -> None:
-        if self._cursor is None:
-            self._stash = current
+        if text and not (self._items and self._items[-1] == text):
+            self._items.append(text)
+            if len(self._items) > self._max:
+                self._items = self._items[-self._max :]
+        self.reset_nav()
 
     def older(self, current: str) -> Optional[str]:
+        """↑ 更旧；已在最旧返回 None。"""
         if not self._items:
             return None
-        self.begin_nav(current)
-        if self._cursor is None:
-            self._cursor = len(self._items) - 1
-        elif self._cursor > 0:
-            self._cursor -= 1
-        return self._items[self._cursor]
+        if not self._nav:
+            self._draft = current
+            self._nav = True
+            self._idx = len(self._items)
+        if self._idx <= 0:
+            return None
+        self._idx -= 1
+        return self._items[self._idx]
 
     def newer(self, current: str) -> Optional[str]:
-        if self._cursor is None:
+        """↓ 更新；已在草稿返回 None。"""
+        if not self._nav:
             return None
-        self.begin_nav(current)
-        assert self._cursor is not None
-        if self._cursor < len(self._items) - 1:
-            self._cursor += 1
-            return self._items[self._cursor]
-        self._cursor = None
-        return self._stash
-
-    @property
-    def navigating(self) -> bool:
-        return self._cursor is not None
+        if self._idx >= len(self._items):
+            return None
+        self._idx += 1
+        if self._idx >= len(self._items):
+            self._idx = len(self._items)
+            return self._draft
+        return self._items[self._idx]
 
     def load(self, path: str | Path) -> None:
         p = Path(path)
@@ -73,10 +76,12 @@ class History:
         except OSError:
             return
         self._items = [ln for ln in raw if ln][-self._max :]
-        self._cursor = None
-        self._stash = ""
+        self.reset_nav()
 
     def save(self, path: str | Path) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("\n".join(self._items) + ("\n" if self._items else ""), encoding="utf-8")
+        p.write_text(
+            "\n".join(self._items) + ("\n" if self._items else ""),
+            encoding="utf-8",
+        )

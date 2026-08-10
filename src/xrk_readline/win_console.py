@@ -1,4 +1,4 @@
-"""Windows 控制台：msvcrt，不安装进程级 readline hook。"""
+"""Windows 控制台：msvcrt + ANSI 方向键（Windows Terminal）。"""
 
 from __future__ import annotations
 
@@ -15,18 +15,37 @@ _vt_ready = False
 
 
 def _ensure_vt() -> None:
-    """开启虚拟终端序列，便于 \\x1b 光标移动。"""
     global _vt_ready
     if _vt_ready:
         return
     try:
-        handle = ctypes.windll.kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        handle = ctypes.windll.kernel32.GetStdHandle(-11)
         mode = ctypes.c_uint()
         if ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
             ctypes.windll.kernel32.SetConsoleMode(handle, mode.value | _ENABLE_VT)
     except Exception:
         pass
     _vt_ready = True
+
+
+_LEGACY = {
+    "H": Key.UP,
+    "P": Key.DOWN,
+    "K": Key.LEFT,
+    "M": Key.RIGHT,
+    "G": Key.HOME,
+    "O": Key.END,
+    "S": Key.DELETE,
+}
+
+_CSI = {
+    "A": Key.UP,
+    "B": Key.DOWN,
+    "C": Key.RIGHT,
+    "D": Key.LEFT,
+    "H": Key.HOME,
+    "F": Key.END,
+}
 
 
 class WinConsole:
@@ -46,7 +65,15 @@ class WinConsole:
                 return self._decode(msvcrt.getwch())
             if deadline is not None and time.monotonic() >= deadline:
                 return None
-            time.sleep(0.02)
+            time.sleep(0.01)
+
+    def _read_more(self, wait: float = 0.03) -> str:
+        end = time.monotonic() + wait
+        while time.monotonic() < end:
+            if msvcrt.kbhit():
+                return msvcrt.getwch()
+            time.sleep(0.005)
+        return ""
 
     def _decode(self, ch: str) -> KeyEvent:
         if ch in ("\r", "\n"):
@@ -59,22 +86,35 @@ class WinConsole:
             return KeyEvent(Key.CTRL_C)
         if ch == "\x04":
             return KeyEvent(Key.CTRL_D)
-        # 功能键前缀
+        # 传统功能键：0 / 0xE0 前缀
         if ch in ("\x00", "\xe0"):
-            code = msvcrt.getwch()
-            mapping = {
-                "H": Key.UP,
-                "P": Key.DOWN,
-                "K": Key.LEFT,
-                "M": Key.RIGHT,
-                "G": Key.HOME,
-                "O": Key.END,
-                "S": Key.DELETE,
-            }
-            kind = mapping.get(code)
-            if kind:
-                return KeyEvent(kind)
-            return KeyEvent(Key.CHAR, "")
+            code = self._read_more(0.05) or ""
+            kind = _LEGACY.get(code)
+            return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
+        # Windows Terminal / VT：ESC [ A
+        if ch == "\x1b":
+            return self._ansi()
         if ch.isprintable() or ord(ch) > 127:
             return KeyEvent(Key.CHAR, ch)
+        return KeyEvent(Key.CHAR, "")
+
+    def _ansi(self) -> KeyEvent:
+        n1 = self._read_more(0.04)
+        if not n1:
+            return KeyEvent(Key.CHAR, "")
+        if n1 == "[":
+            n2 = self._read_more(0.04)
+            if not n2:
+                return KeyEvent(Key.CHAR, "")
+            if n2 in _CSI:
+                return KeyEvent(_CSI[n2])
+            if n2 == "3" and self._read_more(0.04) == "~":
+                return KeyEvent(Key.DELETE)
+            return KeyEvent(Key.CHAR, "")
+        if n1 == "O":
+            n2 = self._read_more(0.04)
+            if n2 == "H":
+                return KeyEvent(Key.HOME)
+            if n2 == "F":
+                return KeyEvent(Key.END)
         return KeyEvent(Key.CHAR, "")

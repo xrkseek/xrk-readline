@@ -6,10 +6,21 @@ import select
 import sys
 import termios
 import tty
-from contextlib import contextmanager
-from typing import Iterator, Optional
+from typing import Optional
 
 from .keys import Key, KeyEvent
+
+_CSI = {
+    "[A": Key.UP,
+    "[B": Key.DOWN,
+    "[C": Key.RIGHT,
+    "[D": Key.LEFT,
+    "[H": Key.HOME,
+    "[F": Key.END,
+    "[3~": Key.DELETE,
+    "OH": Key.HOME,
+    "OF": Key.END,
+}
 
 
 class PosixConsole:
@@ -18,23 +29,6 @@ class PosixConsole:
 
     def flush(self) -> None:
         sys.stdout.flush()
-
-    @contextmanager
-    def _cbreak(self) -> Iterator[None]:
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-        try:
-            tty.setcbreak(fd)
-            yield
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-    def read_key(self, *, timeout: Optional[float] = None) -> Optional[KeyEvent]:
-        fd = sys.stdin.fileno()
-        # 每次短超时轮询，便于外部 stop；整段 readline 期间保持 cbreak
-        if not hasattr(self, "_raw_depth"):
-            self._raw_depth = 0
-        return self._read_with_raw(fd, timeout)
 
     def enter_raw(self) -> None:
         if getattr(self, "_raw_depth", 0) == 0:
@@ -49,20 +43,17 @@ class PosixConsole:
         if depth <= 0 and hasattr(self, "_old"):
             termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old)
 
-    def _read_with_raw(self, fd: int, timeout: Optional[float]) -> Optional[KeyEvent]:
+    def read_key(self, *, timeout: Optional[float] = None) -> Optional[KeyEvent]:
+        fd = sys.stdin.fileno()
         owned = getattr(self, "_raw_depth", 0) == 0
         if owned:
             self.enter_raw()
         try:
             slice_t = 0.05 if timeout is None else timeout
-            while True:
-                ready, _, _ = select.select([fd], [], [], slice_t)
-                if ready:
-                    ch = sys.stdin.read(1)
-                    return self._decode(ch, fd)
-                if timeout is not None:
-                    return None
-                # timeout is None：一直等到有键
+            ready, _, _ = select.select([fd], [], [], slice_t)
+            if not ready:
+                return None
+            return self._decode(sys.stdin.read(1), fd)
         finally:
             if owned:
                 self.leave_raw()
@@ -85,27 +76,13 @@ class PosixConsole:
         return KeyEvent(Key.CHAR, "")
 
     def _ansi(self, fd: int) -> KeyEvent:
-        # 非阻塞再读
         seq = ""
-        for _ in range(4):
-            ready, _, _ = select.select([fd], [], [], 0.02)
+        for _ in range(6):
+            ready, _, _ = select.select([fd], [], [], 0.025)
             if not ready:
                 break
             seq += sys.stdin.read(1)
-        table = {
-            "[A": Key.UP,
-            "[B": Key.DOWN,
-            "[C": Key.RIGHT,
-            "[D": Key.LEFT,
-            "[H": Key.HOME,
-            "[F": Key.END,
-            "[3~": Key.DELETE,
-            "OH": Key.HOME,
-            "OF": Key.END,
-        }
-        for key, kind in table.items():
-            if seq.startswith(key) or seq == key:
-                return KeyEvent(kind)
-        if seq.startswith("[3"):
-            return KeyEvent(Key.DELETE)
+            for key, kind in _CSI.items():
+                if seq == key or seq.startswith(key):
+                    return KeyEvent(kind)
         return KeyEvent(Key.CHAR, "")

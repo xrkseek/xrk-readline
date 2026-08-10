@@ -165,6 +165,61 @@ xrk_leave_raw(PyObject *self, PyObject *args)
 }
 
 #ifdef _WIN32
+static int
+poll_wch(int wait_ms)
+{
+    DWORD start = GetTickCount();
+    for (;;) {
+        if (_kbhit()) {
+            return _getwch();
+        }
+        if (wait_ms >= 0) {
+            DWORD elapsed = GetTickCount() - start;
+            if ((int)elapsed >= (DWORD)wait_ms) {
+                return -1;
+            }
+        }
+        Sleep(5);
+    }
+}
+
+static PyObject *
+decode_ansi_win(void)
+{
+    int c1 = poll_wch(40);
+    int c2;
+
+    if (c1 < 0) {
+        return make_key(KIND_CHAR, "");
+    }
+    if (c1 == '[') {
+        c2 = poll_wch(40);
+        if (c2 < 0) {
+            return make_key(KIND_CHAR, "");
+        }
+        switch (c2) {
+        case 'A': return make_key(KIND_UP, "");
+        case 'B': return make_key(KIND_DOWN, "");
+        case 'C': return make_key(KIND_RIGHT, "");
+        case 'D': return make_key(KIND_LEFT, "");
+        case 'H': return make_key(KIND_HOME, "");
+        case 'F': return make_key(KIND_END, "");
+        case '3':
+            if (poll_wch(40) == '~') {
+                return make_key(KIND_DELETE, "");
+            }
+            return make_key(KIND_CHAR, "");
+        default: return make_key(KIND_CHAR, "");
+        }
+    }
+    if (c1 == 'O') {
+        c2 = poll_wch(40);
+        if (c2 == 'H') return make_key(KIND_HOME, "");
+        if (c2 == 'F') return make_key(KIND_END, "");
+    }
+    return make_key(KIND_CHAR, "");
+}
+
 static PyObject *
 read_key_win(int timeout_ms)
 {
@@ -186,6 +241,9 @@ read_key_win(int timeout_ms)
                 case 83: return make_key(KIND_DELETE, "");
                 default: return make_key(KIND_CHAR, "");
                 }
+            }
+            if (c == 27) {
+                return decode_ansi_win();
             }
             if (c == '\r' || c == '\n') {
                 return make_key(KIND_ENTER, "");
@@ -226,7 +284,7 @@ read_key_win(int timeout_ms)
                 return NULL;
             }
         }
-        Sleep(15);
+        Sleep(10);
     }
 }
 #else

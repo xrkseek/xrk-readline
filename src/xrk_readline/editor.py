@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
-from .history import History
 from .console import create_console
+from .history import History
 from .keys import Key
 from .width import text_width
 
@@ -40,7 +40,6 @@ class Readline:
         self._completer_delims = delims or " \t\n;"
 
     def set_stop_check(self, fn: Optional[Callable[[], bool]]) -> None:
-        """返回 True 时中断当前 readline（服务关闭）。"""
         self._stop_check = fn
 
     def parse_and_bind(self, _line: str) -> None:
@@ -55,6 +54,7 @@ class Readline:
                 raise EOFError
             return line
 
+        self._history.reset_nav()
         buf: List[str] = []
         pos = 0
         clear_w = 0
@@ -64,7 +64,7 @@ class Readline:
             enter_raw()
 
         try:
-            clear_w = self._render(prompt, buf, pos, clear_width=0)
+            clear_w = self._paint(prompt, buf, pos, clear_w)
 
             while True:
                 if self._stop_check and self._stop_check():
@@ -76,88 +76,92 @@ class Readline:
                 if ev is None:
                     continue
 
-                if ev.kind == Key.ENTER:
+                kind = ev.kind
+
+                if kind == Key.ENTER:
                     line = "".join(buf)
                     self._console.write("\n")
                     self._console.flush()
                     self._history.add(line)
                     return line + "\n"
 
-                if ev.kind == Key.CTRL_C:
+                if kind == Key.CTRL_C:
                     if buf:
                         buf.clear()
                         pos = 0
-                        clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                        self._history.reset_nav()
+                        clear_w = self._paint(prompt, buf, pos, clear_w)
                         continue
                     self._console.write("^C\n")
                     self._console.flush()
+                    self._history.reset_nav()
                     raise KeyboardInterrupt
 
-                if ev.kind == Key.CTRL_D:
+                if kind == Key.CTRL_D:
                     if not buf:
                         self._console.write("\n")
                         self._console.flush()
                         raise EOFError
                     if pos < len(buf):
                         del buf[pos]
-                        clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                        clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.BACKSPACE and pos > 0:
+                if kind == Key.BACKSPACE and pos > 0:
                     del buf[pos - 1]
                     pos -= 1
-                    clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                    clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.DELETE and pos < len(buf):
+                if kind == Key.DELETE and pos < len(buf):
                     del buf[pos]
-                    clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                    clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.LEFT and pos > 0:
+                if kind == Key.LEFT and pos > 0:
                     pos -= 1
-                    clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                    clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.RIGHT and pos < len(buf):
+                if kind == Key.RIGHT and pos < len(buf):
                     pos += 1
-                    clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                    clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.HOME:
+                if kind == Key.HOME:
                     pos = 0
-                    clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                    clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.END:
+                if kind == Key.END:
                     pos = len(buf)
-                    clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                    clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.UP:
+                if kind == Key.UP:
                     nxt = self._history.older("".join(buf))
                     if nxt is not None:
-                        buf = list(nxt)
+                        buf[:] = list(nxt)
                         pos = len(buf)
-                        clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                        clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.DOWN:
+                if kind == Key.DOWN:
                     nxt = self._history.newer("".join(buf))
                     if nxt is not None:
-                        buf = list(nxt)
+                        buf[:] = list(nxt)
                         pos = len(buf)
-                        clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                        clear_w = self._paint(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.TAB:
+                if kind == Key.TAB:
                     clear_w, pos = self._complete(prompt, buf, pos, clear_w)
                     continue
 
-                if ev.kind == Key.CHAR and ev.char:
+                if kind == Key.CHAR and ev.char:
                     buf[pos:pos] = list(ev.char)
                     pos += len(ev.char)
-                    clear_w = self._render(prompt, buf, pos, clear_width=clear_w)
+                    clear_w = self._paint(prompt, buf, pos, clear_w)
         finally:
             if callable(leave_raw):
                 leave_raw()
@@ -185,10 +189,9 @@ class Readline:
 
         if len(matches) == 1:
             insertion = matches[0]
-            new_line = line[:start] + insertion + line[pos:]
-            buf[:] = list(new_line)
+            buf[:] = list(line[:start] + insertion + line[pos:])
             new_pos = start + len(insertion)
-            return self._render(prompt, buf, new_pos, clear_width=clear_w), new_pos
+            return self._paint(prompt, buf, new_pos, clear_w), new_pos
 
         self._console.write("\n" + "  ".join(matches) + "\n")
         self._console.flush()
@@ -199,13 +202,12 @@ class Readline:
                 i += 1
             common = common[:i]
         if len(common) > len(prefix):
-            new_line = line[:start] + common + line[pos:]
-            buf[:] = list(new_line)
+            buf[:] = list(line[:start] + common + line[pos:])
             new_pos = start + len(common)
-            return self._render(prompt, buf, new_pos, clear_width=0), new_pos
-        return self._render(prompt, buf, pos, clear_width=0), pos
+            return self._paint(prompt, buf, new_pos, 0), new_pos
+        return self._paint(prompt, buf, pos, 0), pos
 
-    def _render(self, prompt: str, buf: List[str], pos: int, *, clear_width: int) -> int:
+    def _paint(self, prompt: str, buf: List[str], pos: int, clear_width: int) -> int:
         text = "".join(buf)
         total_w = text_width(prompt) + text_width(text)
         wipe = max(clear_width, total_w)
