@@ -9,7 +9,7 @@ description = "Lightweight readline for CLIs: C console backend + Python editor 
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "XRK" }]
+authors = [{ name = "Xrkseek", email = "141429406+sunflowermm@users.noreply.github.com" }]
 keywords = ["readline", "cli", "console", "windows", "c-extension", "repl"]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -20,12 +20,18 @@ classifiers = [
   "Operating System :: POSIX",
   "Programming Language :: C",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: System :: Shells",
 ]
 dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/sunflowermm/xrk-readline"
+Documentation = "https://sunflowermm.github.io/xrk-readline/"
+Repository = "https://github.com/sunflowermm/xrk-readline"
 Issues = "https://github.com/sunflowermm/xrk-readline/issues"
 
 [tool.setuptools.packages.find]

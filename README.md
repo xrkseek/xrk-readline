@@ -1,64 +1,104 @@
 # xrk-readline
 
-轻量 CLI 行编辑库：**C 扩展读控制台** + **Python 做编辑器**，可选纯 Python 回退。  
-适合在 uvicorn / 后台线程里挂 `prompt>`，不挂钩进程级 `PyOS_Readline`（避开 pyreadline3 一类坑）。
+轻量 CLI 行编辑：**C 扩展读控制台** + **Python 编辑器**，无编译器时自动纯 Python 回退。  
+适合在 uvicorn / 后台线程挂 `prompt>`，**不**挂钩进程级 `PyOS_Readline`（避开 pyreadline3 坑）。
 
-## 架构（开源友好）
+仓库：[github.com/sunflowermm/xrk-readline](https://github.com/sunflowermm/xrk-readline)
 
-```
-┌─────────────────────────────────────┐
-│  Python: Readline / History / Tab   │  ← 易改、易测
-├─────────────────────────────────────┤
-│  C: xrk_readline._native            │  ← Win WriteConsoleW / _getwch
-│     或 pure: win_console/posix      │     POSIX termios + select
-└─────────────────────────────────────┘
-```
+## 用户怎么装（推荐：从 Git 拉）
 
-| 层 | 语言 | 职责 |
-|----|------|------|
-| 编辑器 | Python | 缓冲、历史、补全、重绘 |
-| 控制台 I/O | **C**（优先） | 原始按键、UTF-8 输出、VT、raw mode |
-| 回退 | Python | 无编译器 / `XRK_READLINE_PURE=1` |
-
-发布时用 **cibuildwheel** 打各平台 wheel；源码包在能编译的环境装 C 扩展，否则仍可用。
-
-## 安装
+当前以 GitHub 为分发源（尚未上 PyPI 时用这个）：
 
 ```bash
-pip install xrk-readline
-# 开发（编 C 扩展，需本机编译器：Windows=MSVC Build Tools）
-pip install -e .
-# 强制纯 Python
-XRK_READLINE_PURE=1 pip install -e .
+# HTTPS
+pip install "git+https://github.com/sunflowermm/xrk-readline.git"
+
+# SSH
+pip install "git+ssh://git@github.com/sunflowermm/xrk-readline.git"
+
+# 钉版本 / 分支
+pip install "git+https://github.com/sunflowermm/xrk-readline.git@main"
+pip install "git+https://github.com/sunflowermm/xrk-readline.git@v0.2.0"
+
+# uv
+uv pip install "git+https://github.com/sunflowermm/xrk-readline.git"
+
+# 强制纯 Python（不编 C 扩展）
+XRK_READLINE_PURE=1 pip install "git+https://github.com/sunflowermm/xrk-readline.git"
 ```
+
+`pyproject.toml` / `requirements.txt`：
+
+```toml
+# pyproject.toml
+dependencies = [
+  "xrk-readline @ git+https://github.com/sunflowermm/xrk-readline.git",
+]
+```
+
+```text
+# requirements.txt
+xrk-readline @ git+https://github.com/sunflowermm/xrk-readline.git
+```
+
+开发者本地：
+
+```bash
+git clone git@github.com:sunflowermm/xrk-readline.git
+cd xrk-readline
+pip install -e .
+# Windows 编 C 扩展需 MSVC Build Tools；编不过会 optional 跳过，仍可用纯 Python
+```
+
+## 用法
 
 ```python
 from xrk_readline import Readline, backend_name
 
 print(backend_name())  # "native-c" 或 "pure-python"
+
 rl = Readline()
-line = rl.readline("app> ")
+rl.set_completer(lambda text, state: ["help", "exit", "list"][state]
+                 if state < 3 and ["help", "exit", "list"][state].startswith(text) else None)
+
+try:
+    line = rl.readline("app> ")
+except KeyboardInterrupt:
+    print("^C")
+except EOFError:
+    print("bye")
 ```
 
-## 快捷键
+### 快捷键
 
-←→ Home End · Backspace Delete · ↑↓ 历史 · Tab 补全 · Ctrl+C / Ctrl+D
+| 键 | 行为 |
+|----|------|
+| ← → Home End | 光标 |
+| Backspace Delete | 删除 |
+| ↑ ↓ | 历史 |
+| Tab | 补全（需 `set_completer`） |
+| Ctrl+C | 有内容先清空；空行 `KeyboardInterrupt` |
+| Ctrl+D | 空行 `EOFError` |
 
-## 拆仓发布
+## 架构
 
-本目录可直接作为独立 Git 仓库根：
+| 层 | 语言 | 职责 |
+|----|------|------|
+| 编辑器 | Python | 缓冲、历史、补全、重绘 |
+| 控制台 I/O | C（优先） | 按键、UTF-8 输出、VT、raw |
+| 回退 | Python | `XRK_READLINE_PURE=1` / 无编译器 |
 
-```text
-xrk-readline/
-  pyproject.toml
-  setup.py              # Extension("xrk_readline._native", ...)
-  LICENSE
-  README.md
-  src/native/_native.c
-  src/xrk_readline/
-```
+## GitHub Pages？
 
-建议 CI：`cibuildwheel` → PyPI；标签 `v0.2.0`。
+**Pages 适合放文档站，不适合当 pip 源。**
+
+| 方式 | 用途 |
+|------|------|
+| `pip install git+https://...` | **拉代码安装**（推荐现在就用） |
+| [PyPI](https://pypi.org) | `pip install xrk-readline`（需你上传 wheel/sdist） |
+| GitHub Pages | 说明页 / API 文档；用户仍用上面命令安装 |
+
+本仓 `docs/` 可开 Pages 展示安装说明；安装命令仍写 `git+https://...`。
 
 ## License
 
