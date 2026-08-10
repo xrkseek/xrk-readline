@@ -1,4 +1,4 @@
-"""POSIX：os.read → KeyStream。"""
+"""POSIX：raw + os.read → KeyStream（SSH/xterm 友好）。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ from typing import Optional
 from .keys import KeyEvent
 from .keystream import KeyStream
 
-_NORMAL_CURSOR = b"\x1b[?1l"
+# 普通光标键 + 数字小键盘；仍识别 ESC OA
+_TERM_SETUP = b"\x1b[?1l\x1b>"
 
 
 class PosixConsole:
@@ -32,10 +33,11 @@ class PosixConsole:
         if self._raw_depth == 0:
             self._fd = sys.stdin.fileno()
             self._old = termios.tcgetattr(self._fd)
-            tty.setcbreak(self._fd)
+            # setraw：关回显/规范模式，SSH 下比 cbreak 更稳
+            tty.setraw(self._fd)
             self._stream.clear()
             try:
-                os.write(sys.stdout.fileno(), _NORMAL_CURSOR)
+                os.write(sys.stdout.fileno(), _TERM_SETUP)
             except OSError:
                 pass
         self._raw_depth += 1
@@ -53,9 +55,16 @@ class PosixConsole:
         if owned:
             self.enter_raw()
         try:
-            poll = 0.05 if timeout is None else timeout
-            # 半截 ESC 时也要阻塞等后续字节，否则会空转
-            self._pump(fd, poll)
+            wait = 0.05 if timeout is None else timeout
+            self._pump(fd, wait)
+            # 半截序列：同一次调用里再等一小段（SSH 分包）
+            for _ in range(3):
+                ev = self._stream.poll()
+                if ev is not None:
+                    return ev
+                if not self._stream.pending:
+                    return None
+                self._pump(fd, 0.03)
             return self._stream.poll()
         finally:
             if owned:
@@ -70,11 +79,10 @@ class PosixConsole:
 
     def _pump(self, fd: int, timeout: float) -> None:
         if not self._ready(fd, timeout):
-            # 即使没有新字节，也要让挂起的 ESC 有机会超时结算
             return
         while self._ready(fd, 0.0):
             try:
-                chunk = os.read(fd, 256)
+                chunk = os.read(fd, 512)
             except OSError:
                 break
             if not chunk:

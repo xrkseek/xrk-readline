@@ -1,4 +1,4 @@
-"""Windows：msvcrt 扩展键优先；仅输出开 VT（不开 VT 输入，避免 ESC[A 与 msvcrt 打架）。"""
+"""Windows：msvcrt 扩展键；仅输出 VT。CSI 残片走 KeyStream 孤儿恢复。"""
 
 from __future__ import annotations
 
@@ -44,11 +44,15 @@ class WinConsole:
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             self._pump()
-            ev = self._stream.poll()
-            if ev is not None:
-                return ev
+            for _ in range(3):
+                ev = self._stream.poll()
+                if ev is not None:
+                    return ev
+                if not self._stream.pending:
+                    break
+                time.sleep(0.01)
+                self._pump()
             if deadline is not None and time.monotonic() >= deadline:
-                # 再 poll 一次：让挂起 ESC/\xe0 超时丢弃
                 return self._stream.poll()
             time.sleep(0.005)
 

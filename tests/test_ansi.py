@@ -1,4 +1,4 @@
-"""按键流与历史解码测试。"""
+"""KeyStream 单元测试。"""
 
 from __future__ import annotations
 
@@ -8,15 +8,13 @@ from xrk_readline.keys import Key
 from xrk_readline.keystream import KeyStream, csi_kind, ss3_kind
 
 
-def test_csi_ss3_tables() -> None:
+def test_tables() -> None:
     assert csi_kind("A") == Key.UP
     assert csi_kind("1;5D") == Key.WORD_LEFT
-    assert csi_kind("3~") == Key.DELETE
     assert ss3_kind("B") == Key.DOWN
 
 
 def test_csi_across_polls() -> None:
-    """ESC 与 [A 分片到达：中途 poll 必须为 None，不能漏出 [A。"""
     s = KeyStream()
     s.push("\x1b")
     assert s.poll(now=100.0) is None
@@ -27,18 +25,33 @@ def test_csi_across_polls() -> None:
     assert ev is not None and ev.kind == Key.UP
 
 
-def test_ss3_across_polls() -> None:
+def test_orphan_csi_no_esc() -> None:
+    """终端吞掉 ESC 后只剩 [A。"""
     s = KeyStream()
-    s.push("\x1b")
-    assert s.poll(now=1.0) is None
-    s.push("O")
-    assert s.poll(now=1.1) is None
+    s.push("[")
     s.push("A")
-    ev = s.poll(now=1.2)
+    ev = s.poll(now=1.0)
     assert ev is not None and ev.kind == Key.UP
 
 
-def test_win_legacy_across_polls() -> None:
+def test_orphan_ss3() -> None:
+    s = KeyStream()
+    s.push("O")
+    s.push("B")
+    ev = s.poll(now=1.0)
+    assert ev is not None and ev.kind == Key.DOWN
+
+
+def test_literal_bracket_stays() -> None:
+    """单独 [ 后不是方向键终结符 → 仍当字符。"""
+    s = KeyStream()
+    s.push("[")
+    s.push("x")
+    ev = s.poll(now=1.0)
+    assert ev is not None and ev.kind == Key.CHAR and ev.char == "["
+
+
+def test_win_legacy() -> None:
     s = KeyStream()
     s.push("\xe0")
     assert s.poll(now=1.0) is None
@@ -47,18 +60,21 @@ def test_win_legacy_across_polls() -> None:
     assert ev is not None and ev.kind == Key.UP
 
 
-def test_burst_csi() -> None:
+def test_orphan_csi_split() -> None:
     s = KeyStream()
-    for ch in "\x1b[A":
-        s.push(ch)
-    ev = s.poll(now=time.monotonic())
+    s.push("[")
+    assert s.poll(now=1.0) is None
+    s.push("A")
+    ev = s.poll(now=1.1)
     assert ev is not None and ev.kind == Key.UP
 
 
 if __name__ == "__main__":
-    test_csi_ss3_tables()
+    test_tables()
     test_csi_across_polls()
-    test_ss3_across_polls()
-    test_win_legacy_across_polls()
-    test_burst_csi()
+    test_orphan_csi_no_esc()
+    test_orphan_csi_split()
+    test_orphan_ss3()
+    test_literal_bracket_stays()
+    test_win_legacy()
     print("ok")

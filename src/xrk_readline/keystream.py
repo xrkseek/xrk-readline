@@ -1,4 +1,4 @@
-"""按键流：未完成的 ESC/CSI/SS3、Win 扩展键跨 poll 挂起，避免 [A 漏成字符。"""
+"""按键流：跨 poll 挂起未完成序列；兼容 SSH/xterm 吞掉 ESC 只剩 [A 的情况。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ from typing import List, Optional
 
 from .keys import Key, KeyEvent
 
-ESC_WAIT = 0.4
+# 单独 ESC 等待；半截 CSI 更长，超时整段丢弃（不漏成字符）
+ESC_WAIT = 1.0
+CSI_STUCK = 2.5
 
 CTRL = {
     "\x01": Key.CTRL_A,
@@ -74,8 +76,6 @@ def ss3_kind(ch: str) -> Optional[str]:
 
 
 class KeyStream:
-    """字符队列 → 完整 KeyEvent；缺字节时返回 None 并保留队列。"""
-
     def __init__(self) -> None:
         self._q: List[str] = []
         self._hold_at: Optional[float] = None
@@ -108,6 +108,12 @@ class KeyStream:
         if head in ("\x00", "\xe0"):
             return self._poll_win_legacy()
 
+        orphan = self._poll_orphan_arrow()
+        if orphan is not None:
+            return orphan
+        if self._orphan_waiting():
+            return None
+
         self._hold_at = None
         ch = self._q.pop(0)
         if ch in ("\r", "\n"):
@@ -127,13 +133,60 @@ class KeyStream:
         if self._hold_at is None:
             self._hold_at = now
 
-    def _timed_out(self, now: float) -> bool:
-        return self._hold_at is not None and (now - self._hold_at) >= ESC_WAIT
+    def _age(self, now: float) -> float:
+        return 0.0 if self._hold_at is None else (now - self._hold_at)
 
     def _drop_head(self) -> None:
         if self._q:
             self._q.pop(0)
         self._hold_at = None
+
+    def _drop_prefix(self, n: int) -> None:
+        del self._q[:n]
+        self._hold_at = None
+
+    def _orphan_waiting(self) -> bool:
+        if not self._q:
+            return False
+        if self._q[0] == "[":
+            if len(self._q) == 1:
+                return True
+            for c in self._q[1:]:
+                if c.isalpha() or c == "~":
+                    return False
+                if c not in "0123456789;?":
+                    return False
+            return True
+        if self._q[0] == "O":
+            return len(self._q) == 1
+        return False
+
+    def _poll_orphan_arrow(self) -> Optional[KeyEvent]:
+        """无 ESC 的 CSI/SS3 残片（ConPTY / 部分 SSH）。"""
+        if not self._q:
+            return None
+        if self._q[0] == "[":
+            end = None
+            for i in range(1, min(len(self._q), 16)):
+                c = self._q[i]
+                if c.isalpha() or c == "~":
+                    end = i
+                    break
+            if end is None:
+                return None
+            seq = "".join(self._q[1 : end + 1])
+            kind = csi_kind(seq)
+            if kind is None:
+                return None
+            self._drop_prefix(end + 1)
+            return KeyEvent(kind)
+        if self._q[0] == "O" and len(self._q) >= 2:
+            kind = ss3_kind(self._q[1])
+            if kind is None:
+                return None
+            self._drop_prefix(2)
+            return KeyEvent(kind)
+        return None
 
     def _poll_win_legacy(self) -> Optional[KeyEvent]:
         if len(self._q) < 2:
@@ -146,9 +199,14 @@ class KeyStream:
 
     def _poll_esc(self, now: float) -> Optional[KeyEvent]:
         self._begin_hold(now)
-        # 单独 ESC：超时丢弃；ESC[ / ESC O：死等终结，绝不漏 [A
+        age = self._age(now)
+
+        # ESC ESC… → 折叠为一个 ESC
+        while len(self._q) >= 2 and self._q[0] == "\x1b" and self._q[1] == "\x1b":
+            self._q.pop(0)
+
         if len(self._q) < 2:
-            if self._timed_out(now):
+            if age >= ESC_WAIT:
                 self._drop_head()
             return None
 
@@ -161,21 +219,27 @@ class KeyStream:
                     end = i
                     break
             if end is None:
+                if age >= CSI_STUCK:
+                    # 半截 CSI：整段丢掉，绝不把 [ 打进行缓冲
+                    self._q.clear()
+                    self._hold_at = None
                 return None
             seq = "".join(self._q[2 : end + 1])
-            del self._q[: end + 1]
-            self._hold_at = None
+            self._drop_prefix(end + 1)
             kind = csi_kind(seq)
             return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
 
         if n1 == "O":
             if len(self._q) < 3:
+                if age >= CSI_STUCK:
+                    self._q.clear()
+                    self._hold_at = None
                 return None
             ch = self._q[2]
-            del self._q[:3]
-            self._hold_at = None
+            self._drop_prefix(3)
             kind = ss3_kind(ch)
             return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
 
+        # ESC + 普通字符：当作 Alt，忽略修饰，保留后续字符
         self._drop_head()
         return None
