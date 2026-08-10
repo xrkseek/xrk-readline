@@ -1,4 +1,4 @@
-"""Windows：msvcrt 扩展键；仅输出 VT。CSI 残片走 KeyStream 孤儿恢复。"""
+"""Windows：msvcrt；扩展键一次读齐两字节，避免只剩 H/P。"""
 
 from __future__ import annotations
 
@@ -44,13 +44,14 @@ class WinConsole:
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
             self._pump()
-            for _ in range(3):
+            for _ in range(4):
                 ev = self._stream.poll()
                 if ev is not None:
                     return ev
                 if not self._stream.pending:
                     break
-                time.sleep(0.01)
+                # 半截 \\xe0：再吸一眼第二字节
+                time.sleep(0.005)
                 self._pump()
             if deadline is not None and time.monotonic() >= deadline:
                 return self._stream.poll()
@@ -58,4 +59,8 @@ class WinConsole:
 
     def _pump(self) -> None:
         while msvcrt.kbhit():
-            self._stream.push(msvcrt.getwch())
+            ch = msvcrt.getwch()
+            self._stream.push(ch)
+            # 扩展键：同一次泵入扫描码，避免 \\xe0 与 H 被拆到两次 poll
+            if ch in ("\x00", "\xe0") and msvcrt.kbhit():
+                self._stream.push(msvcrt.getwch())

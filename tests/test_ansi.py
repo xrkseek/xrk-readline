@@ -63,13 +63,18 @@ def test_win_enter_not_swallowed_by_xe0() -> None:
     assert ev is not None and ev.kind == Key.ENTER
 
 
-def test_win_legacy_arrow() -> None:
+def test_win_legacy_arrow_waits() -> None:
+    """\\xe0 后即使隔很久也不能丢掉，否则会打出 H/P。"""
     s = KeyStream()
     s.push("\xe0")
     assert s.poll(now=1.0) is None
+    assert s.poll(now=2.0) is None
     s.push("H")
-    ev = s.poll(now=1.1)
+    ev = s.poll(now=2.1)
     assert ev is not None and ev.kind == Key.UP
+    s.push("\xe0")
+    s.push("P")
+    assert s.poll(now=3.0).kind == Key.DOWN
 
 
 if __name__ == "__main__":
@@ -80,4 +85,5 @@ if __name__ == "__main__":
     test_literal_bracket()
     test_win_enter_not_swallowed_by_xe0()
     test_win_legacy_arrow()
+    test_win_legacy_arrow_waits()
     print("ok")

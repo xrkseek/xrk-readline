@@ -223,14 +223,11 @@ class KeyStream:
         return None
 
     def _poll_win_legacy(self, now: float) -> Optional[KeyEvent]:
-        """``\\xe0``/``\\x00`` + 扫描码。IME 常留下裸前缀；勿把 ``\\r`` 当扫描码吃掉。"""
-        self._begin_hold(now)
+        """``\\xe0``/``\\x00`` + 扫描码（↑=H ↓=P）。缺第二字节时死等，超时丢掉会漏出 H/P。"""
         if len(self._q) < 2:
-            if self._age(now) >= 0.12:
-                self._drop_head()
             return None
         code = self._q[1]
-        # 回车等控制键：丢掉误入的扩展头，留给后续正常解析
+        # 回车等：丢掉误入前缀，勿把 \\r 当扫描码
         if len(code) != 1 or code in ("\r", "\n", "\t", "\x1b", "\x08", "\x7f"):
             self._drop_head()
             return None
