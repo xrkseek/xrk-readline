@@ -1,10 +1,6 @@
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "xrk-readline"
-version = "0.2.4"
+version = "0.2.6"
 description = "Lightweight readline for CLIs: C console backend + Python editor (Windows/POSIX)"
 readme = "README.md"
 requires-python = ">=3.10"

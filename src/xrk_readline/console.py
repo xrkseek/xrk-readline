@@ -1,4 +1,4 @@
-"""控制台后端：优先 C 扩展。"""
+"""控制台：优先 C 扩展，否则 Win/POSIX 纯 Python。"""
 
 from __future__ import annotations
 

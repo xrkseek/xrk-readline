@@ -42,6 +42,8 @@
 #ifndef _WIN32
 static struct termios g_old;
 static int g_raw = 0;
+/* ESC 后续等待（ms）：兼顾本机与 SSH */
+#define ESC_WAIT_MS 350
 #endif
 
 #ifdef _WIN32
@@ -169,6 +171,8 @@ xrk_enter_raw(PyObject *self, PyObject *args)
             if (tcsetattr(STDIN_FILENO, TCSANOW, &t) != 0) {
                 return PyErr_SetFromErrno(PyExc_OSError);
             }
+            /* 普通光标键模式 → 多发 ESC[A；仍解码 ESC OA */
+            (void)write(STDOUT_FILENO, "\x1b[?1l", 5);
         }
         g_raw = 1;
     }
@@ -188,6 +192,57 @@ xrk_leave_raw(PyObject *self, PyObject *args)
     }
 #endif
     Py_RETURN_NONE;
+}
+
+static PyObject *
+decode_csi_body(const char *seq, int n)
+{
+    char final;
+    int ctrl;
+
+    if (n <= 0) {
+        return make_key(KIND_CHAR, "");
+    }
+    if (n == 1) {
+        switch (seq[0]) {
+        case 'A': return make_key(KIND_UP, "");
+        case 'B': return make_key(KIND_DOWN, "");
+        case 'C': return make_key(KIND_RIGHT, "");
+        case 'D': return make_key(KIND_LEFT, "");
+        case 'H': return make_key(KIND_HOME, "");
+        case 'F': return make_key(KIND_END, "");
+        default: return make_key(KIND_CHAR, "");
+        }
+    }
+    if (seq[n - 1] == '~') {
+        if (seq[0] == '3') return make_key(KIND_DELETE, "");
+        if (seq[0] == '1' || seq[0] == '7') return make_key(KIND_HOME, "");
+        if (seq[0] == '4' || seq[0] == '8') return make_key(KIND_END, "");
+        return make_key(KIND_CHAR, "");
+    }
+    final = seq[n - 1];
+    ctrl = strstr(seq, ";5") != NULL;
+    if (final == 'C') return make_key(ctrl ? KIND_WORD_RIGHT : KIND_RIGHT, "");
+    if (final == 'D') return make_key(ctrl ? KIND_WORD_LEFT : KIND_LEFT, "");
+    if (final == 'A') return make_key(KIND_UP, "");
+    if (final == 'B') return make_key(KIND_DOWN, "");
+    if (final == 'H') return make_key(KIND_HOME, "");
+    if (final == 'F') return make_key(KIND_END, "");
+    return make_key(KIND_CHAR, "");
+}
+
+static PyObject *
+decode_ss3(int ch)
+{
+    switch (ch) {
+    case 'A': return make_key(KIND_UP, "");
+    case 'B': return make_key(KIND_DOWN, "");
+    case 'C': return make_key(KIND_RIGHT, "");
+    case 'D': return make_key(KIND_LEFT, "");
+    case 'H': return make_key(KIND_HOME, "");
+    case 'F': return make_key(KIND_END, "");
+    default: return make_key(KIND_CHAR, "");
+    }
 }
 
 #ifdef _WIN32
@@ -212,7 +267,7 @@ poll_wch(int wait_ms)
 static PyObject *
 decode_ansi_win(void)
 {
-    int c1 = poll_wch(40);
+    int c1 = poll_wch(350);
     char seq[16];
     int n = 0;
     int i;
@@ -222,7 +277,7 @@ decode_ansi_win(void)
     }
     if (c1 == '[') {
         for (i = 0; i < 14; i++) {
-            int c = poll_wch(40);
+            int c = poll_wch(350);
             if (c < 0) {
                 break;
             }
@@ -232,35 +287,14 @@ decode_ansi_win(void)
             }
         }
         seq[n] = '\0';
-        if (n == 1) {
-            switch (seq[0]) {
-            case 'A': return make_key(KIND_UP, "");
-            case 'B': return make_key(KIND_DOWN, "");
-            case 'C': return make_key(KIND_RIGHT, "");
-            case 'D': return make_key(KIND_LEFT, "");
-            case 'H': return make_key(KIND_HOME, "");
-            case 'F': return make_key(KIND_END, "");
-            default: break;
-            }
-        }
-        if (n >= 2 && seq[0] == '3' && seq[n - 1] == '~') {
-            return make_key(KIND_DELETE, "");
-        }
-        /* 1;5C / 1;5D = Ctrl+方向 */
-        if (n >= 4 && strchr(seq, ';') && (seq[n - 1] == 'C' || seq[n - 1] == 'D')) {
-            if (strstr(seq, ";5") || strstr(seq, ";5")) {
-                if (seq[n - 1] == 'C') return make_key(KIND_WORD_RIGHT, "");
-                return make_key(KIND_WORD_LEFT, "");
-            }
-            if (seq[n - 1] == 'C') return make_key(KIND_RIGHT, "");
-            return make_key(KIND_LEFT, "");
-        }
-        return make_key(KIND_CHAR, "");
+        return decode_csi_body(seq, n);
     }
     if (c1 == 'O') {
-        int c2 = poll_wch(40);
-        if (c2 == 'H') return make_key(KIND_HOME, "");
-        if (c2 == 'F') return make_key(KIND_END, "");
+        int c2 = poll_wch(350);
+        if (c2 < 0) {
+            return make_key(KIND_CHAR, "");
+        }
+        return decode_ss3(c2);
     }
     return make_key(KIND_CHAR, "");
 }
@@ -372,48 +406,38 @@ read_byte(int fd, char *out, int timeout_ms)
 static PyObject *
 decode_ansi(int fd)
 {
-    char buf[16];
+    char first;
+    char seq[16];
     int n = 0;
     int i;
+    int got;
 
-    for (i = 0; i < 14; i++) {
-        char c;
-        int got = read_byte(fd, &c, 25);
-        if (got <= 0) {
-            break;
-        }
-        buf[n++] = c;
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') {
-            break;
-        }
+    got = read_byte(fd, &first, ESC_WAIT_MS);
+    if (got <= 0) {
+        return make_key(KIND_CHAR, "");
     }
-    buf[n] = '\0';
-    if (n >= 1 && buf[0] == '[') {
-        const char *seq = buf + 1;
-        int sn = n - 1;
-        if (sn == 1) {
-            if (seq[0] == 'A') return make_key(KIND_UP, "");
-            if (seq[0] == 'B') return make_key(KIND_DOWN, "");
-            if (seq[0] == 'C') return make_key(KIND_RIGHT, "");
-            if (seq[0] == 'D') return make_key(KIND_LEFT, "");
-            if (seq[0] == 'H') return make_key(KIND_HOME, "");
-            if (seq[0] == 'F') return make_key(KIND_END, "");
-        }
-        if (sn >= 2 && seq[0] == '3' && seq[sn - 1] == '~') {
-            return make_key(KIND_DELETE, "");
-        }
-        if (sn >= 4 && strchr(seq, ';') && (seq[sn - 1] == 'C' || seq[sn - 1] == 'D')) {
-            if (strstr(seq, ";5")) {
-                if (seq[sn - 1] == 'C') return make_key(KIND_WORD_RIGHT, "");
-                return make_key(KIND_WORD_LEFT, "");
+    if (first == '[') {
+        for (i = 0; i < 14; i++) {
+            char c;
+            got = read_byte(fd, &c, ESC_WAIT_MS);
+            if (got <= 0) {
+                break;
             }
-            if (seq[sn - 1] == 'C') return make_key(KIND_RIGHT, "");
-            return make_key(KIND_LEFT, "");
+            seq[n++] = c;
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') {
+                break;
+            }
         }
+        seq[n] = '\0';
+        return decode_csi_body(seq, n);
     }
-    if (n >= 2 && buf[0] == 'O') {
-        if (buf[1] == 'H') return make_key(KIND_HOME, "");
-        if (buf[1] == 'F') return make_key(KIND_END, "");
+    if (first == 'O') {
+        char c2;
+        got = read_byte(fd, &c2, ESC_WAIT_MS);
+        if (got <= 0) {
+            return make_key(KIND_CHAR, "");
+        }
+        return decode_ss3((unsigned char)c2);
     }
     return make_key(KIND_CHAR, "");
 }

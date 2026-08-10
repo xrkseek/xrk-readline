@@ -1,4 +1,4 @@
-"""历史记录。"""
+"""历史：↑ 更旧，↓ 更新；草稿槽在条目末尾。"""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ from typing import List, Optional
 
 
 class History:
-    """``_idx == len(items)`` 为草稿槽；↑↓ 在条目与草稿间移动。"""
-
     def __init__(self, max_len: int = 500) -> None:
         self._max = max(1, int(max_len))
         self._items: List[str] = []
