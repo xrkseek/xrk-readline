@@ -1,7 +1,8 @@
-"""终端显示宽度（含 CJK）。"""
+"""终端显示宽度与光标几何（含 CJK / 折行）。"""
 
 from __future__ import annotations
 
+import shutil
 import unicodedata
 
 
@@ -13,7 +14,6 @@ def char_width(ch: str) -> int:
     eaw = unicodedata.east_asian_width(ch)
     if eaw in ("F", "W"):
         return 2
-    # emoji / 部分符号
     if ord(ch) >= 0x1F300:
         return 2
     return 1
@@ -23,14 +23,21 @@ def text_width(s: str) -> int:
     return sum(char_width(c) for c in s)
 
 
-def slice_by_width(s: str, max_width: int) -> str:
-    """截到不超过 max_width 列（用于极端窄终端时可扩展）。"""
-    out: list[str] = []
-    w = 0
-    for c in s:
-        cw = char_width(c)
-        if w + cw > max_width:
-            break
-        out.append(c)
-        w += cw
-    return "".join(out)
+def term_cols(fallback: int = 80) -> int:
+    try:
+        return max(8, shutil.get_terminal_size().columns)
+    except OSError:
+        return fallback
+
+
+def rows_for(width: int, cols: int) -> int:
+    if width <= 0:
+        return 1
+    return width // cols + (1 if width % cols else 0)
+
+
+def xy_for(offset: int, cols: int) -> tuple[int, int]:
+    """显示列 offset 对应的 (row, col)，从块左上角起算。"""
+    if offset <= 0 or cols <= 0:
+        return 0, 0
+    return offset // cols, offset % cols

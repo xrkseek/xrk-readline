@@ -44,12 +44,17 @@ except EOFError:
 
 | 键 | 行为 |
 |----|------|
-| ← → Home End | 光标 |
-| Backspace Delete | 删除 |
-| ↑ ↓ | 历史 |
+| ← → · Home/End · Ctrl+A/E | 光标 |
+| Ctrl+← / Ctrl+→ | 按词跳转 |
+| Backspace · Delete | 删除 |
+| Ctrl+W | 删上一词（可 Ctrl+Y 粘回） |
+| Ctrl+U / Ctrl+K | 删到行首 / 行尾 |
+| Ctrl+Y | 粘贴上次删除 |
+| Ctrl+L | 清屏并重绘 |
+| ↑ ↓ | 历史（可来回） |
 | Tab | 补全（需 `set_completer`） |
-| Ctrl+C | 有内容先清空；空行 `KeyboardInterrupt` |
-| Ctrl+D | 空行 `EOFError` |
+| Ctrl+C | 有内容先清空；空行中断 |
+| Ctrl+D | 空行结束 |
 
 ## 架构
 

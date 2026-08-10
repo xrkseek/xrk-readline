@@ -1,4 +1,4 @@
-"""Windows 控制台：msvcrt + ANSI 方向键（Windows Terminal）。"""
+"""Windows 控制台：msvcrt + ANSI / Ctrl 组合键。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,31 @@ from .keys import Key, KeyEvent
 
 _ENABLE_VT = 0x0004
 _vt_ready = False
+
+_CTRL = {
+    "\x01": Key.CTRL_A,
+    "\x05": Key.CTRL_E,
+    "\x0b": Key.CTRL_K,
+    "\x15": Key.CTRL_U,
+    "\x17": Key.CTRL_W,
+    "\x0c": Key.CTRL_L,
+    "\x19": Key.CTRL_Y,
+    "\x03": Key.CTRL_C,
+    "\x04": Key.CTRL_D,
+}
+
+# 传统功能键第二码
+_LEGACY = {
+    "H": Key.UP,
+    "P": Key.DOWN,
+    "K": Key.LEFT,
+    "M": Key.RIGHT,
+    "G": Key.HOME,
+    "O": Key.END,
+    "S": Key.DELETE,
+    "s": Key.WORD_LEFT,   # Ctrl+Left
+    "t": Key.WORD_RIGHT,  # Ctrl+Right
+}
 
 
 def _ensure_vt() -> None:
@@ -28,24 +53,45 @@ def _ensure_vt() -> None:
     _vt_ready = True
 
 
-_LEGACY = {
-    "H": Key.UP,
-    "P": Key.DOWN,
-    "K": Key.LEFT,
-    "M": Key.RIGHT,
-    "G": Key.HOME,
-    "O": Key.END,
-    "S": Key.DELETE,
-}
-
-_CSI = {
-    "A": Key.UP,
-    "B": Key.DOWN,
-    "C": Key.RIGHT,
-    "D": Key.LEFT,
-    "H": Key.HOME,
-    "F": Key.END,
-}
+def _csi_kind(seq: str) -> Optional[str]:
+    """解析 CSI 终字节序列，如 A / 1;5D / 3~。"""
+    if not seq:
+        return None
+    if seq in ("A",):
+        return Key.UP
+    if seq in ("B",):
+        return Key.DOWN
+    if seq in ("C",):
+        return Key.RIGHT
+    if seq in ("D",):
+        return Key.LEFT
+    if seq in ("H",):
+        return Key.HOME
+    if seq in ("F",):
+        return Key.END
+    if seq.endswith("~"):
+        if seq.startswith("3"):
+            return Key.DELETE
+        return None
+    # modifier: 1;5C = Ctrl+Right
+    if ";" in seq and seq[-1] in "ABCDHF":
+        parts = seq[:-1].split(";")
+        mod = parts[-1] if len(parts) > 1 else ""
+        final = seq[-1]
+        ctrl = mod == "5" or mod.endswith("5")
+        if final == "C":
+            return Key.WORD_RIGHT if ctrl else Key.RIGHT
+        if final == "D":
+            return Key.WORD_LEFT if ctrl else Key.LEFT
+        if final == "A":
+            return Key.UP
+        if final == "B":
+            return Key.DOWN
+        if final == "H":
+            return Key.HOME
+        if final == "F":
+            return Key.END
+    return None
 
 
 class WinConsole:
@@ -82,16 +128,13 @@ class WinConsole:
             return KeyEvent(Key.BACKSPACE)
         if ch == "\t":
             return KeyEvent(Key.TAB)
-        if ch == "\x03":
-            return KeyEvent(Key.CTRL_C)
-        if ch == "\x04":
-            return KeyEvent(Key.CTRL_D)
-        # 传统功能键：0 / 0xE0 前缀
+        ctrl = _CTRL.get(ch)
+        if ctrl:
+            return KeyEvent(ctrl)
         if ch in ("\x00", "\xe0"):
             code = self._read_more(0.05) or ""
             kind = _LEGACY.get(code)
             return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
-        # Windows Terminal / VT：ESC [ A
         if ch == "\x1b":
             return self._ansi()
         if ch.isprintable() or ord(ch) > 127:
@@ -103,14 +146,16 @@ class WinConsole:
         if not n1:
             return KeyEvent(Key.CHAR, "")
         if n1 == "[":
-            n2 = self._read_more(0.04)
-            if not n2:
-                return KeyEvent(Key.CHAR, "")
-            if n2 in _CSI:
-                return KeyEvent(_CSI[n2])
-            if n2 == "3" and self._read_more(0.04) == "~":
-                return KeyEvent(Key.DELETE)
-            return KeyEvent(Key.CHAR, "")
+            seq = ""
+            for _ in range(12):
+                c = self._read_more(0.04)
+                if not c:
+                    break
+                seq += c
+                if c.isalpha() or c == "~":
+                    break
+            kind = _csi_kind(seq)
+            return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
         if n1 == "O":
             n2 = self._read_more(0.04)
             if n2 == "H":

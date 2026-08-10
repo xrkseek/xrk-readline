@@ -26,6 +26,15 @@
 #define KIND_HOME "home"
 #define KIND_END "end"
 #define KIND_TAB "tab"
+#define KIND_WORD_LEFT "word_left"
+#define KIND_WORD_RIGHT "word_right"
+#define KIND_CTRL_A "ctrl_a"
+#define KIND_CTRL_E "ctrl_e"
+#define KIND_CTRL_K "ctrl_k"
+#define KIND_CTRL_U "ctrl_u"
+#define KIND_CTRL_W "ctrl_w"
+#define KIND_CTRL_L "ctrl_l"
+#define KIND_CTRL_Y "ctrl_y"
 #define KIND_CTRL_C "ctrl_c"
 #define KIND_CTRL_D "ctrl_d"
 #define KIND_CHAR "char"
@@ -64,6 +73,23 @@ static PyObject *
 make_key(const char *kind, const char *ch)
 {
     return Py_BuildValue("(ss)", kind, ch ? ch : "");
+}
+
+static PyObject *
+ctrl_key(int c)
+{
+    switch (c) {
+    case 1: return make_key(KIND_CTRL_A, "");
+    case 5: return make_key(KIND_CTRL_E, "");
+    case 11: return make_key(KIND_CTRL_K, "");
+    case 21: return make_key(KIND_CTRL_U, "");
+    case 23: return make_key(KIND_CTRL_W, "");
+    case 12: return make_key(KIND_CTRL_L, "");
+    case 25: return make_key(KIND_CTRL_Y, "");
+    case 3: return make_key(KIND_CTRL_C, "");
+    case 4: return make_key(KIND_CTRL_D, "");
+    default: return NULL;
+    }
 }
 
 static PyObject *
@@ -187,33 +213,52 @@ static PyObject *
 decode_ansi_win(void)
 {
     int c1 = poll_wch(40);
-    int c2;
+    char seq[16];
+    int n = 0;
+    int i;
 
     if (c1 < 0) {
         return make_key(KIND_CHAR, "");
     }
     if (c1 == '[') {
-        c2 = poll_wch(40);
-        if (c2 < 0) {
-            return make_key(KIND_CHAR, "");
-        }
-        switch (c2) {
-        case 'A': return make_key(KIND_UP, "");
-        case 'B': return make_key(KIND_DOWN, "");
-        case 'C': return make_key(KIND_RIGHT, "");
-        case 'D': return make_key(KIND_LEFT, "");
-        case 'H': return make_key(KIND_HOME, "");
-        case 'F': return make_key(KIND_END, "");
-        case '3':
-            if (poll_wch(40) == '~') {
-                return make_key(KIND_DELETE, "");
+        for (i = 0; i < 14; i++) {
+            int c = poll_wch(40);
+            if (c < 0) {
+                break;
             }
-            return make_key(KIND_CHAR, "");
-        default: return make_key(KIND_CHAR, "");
+            seq[n++] = (char)c;
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') {
+                break;
+            }
         }
+        seq[n] = '\0';
+        if (n == 1) {
+            switch (seq[0]) {
+            case 'A': return make_key(KIND_UP, "");
+            case 'B': return make_key(KIND_DOWN, "");
+            case 'C': return make_key(KIND_RIGHT, "");
+            case 'D': return make_key(KIND_LEFT, "");
+            case 'H': return make_key(KIND_HOME, "");
+            case 'F': return make_key(KIND_END, "");
+            default: break;
+            }
+        }
+        if (n >= 2 && seq[0] == '3' && seq[n - 1] == '~') {
+            return make_key(KIND_DELETE, "");
+        }
+        /* 1;5C / 1;5D = Ctrl+方向 */
+        if (n >= 4 && strchr(seq, ';') && (seq[n - 1] == 'C' || seq[n - 1] == 'D')) {
+            if (strstr(seq, ";5") || strstr(seq, ";5")) {
+                if (seq[n - 1] == 'C') return make_key(KIND_WORD_RIGHT, "");
+                return make_key(KIND_WORD_LEFT, "");
+            }
+            if (seq[n - 1] == 'C') return make_key(KIND_RIGHT, "");
+            return make_key(KIND_LEFT, "");
+        }
+        return make_key(KIND_CHAR, "");
     }
     if (c1 == 'O') {
-        c2 = poll_wch(40);
+        int c2 = poll_wch(40);
         if (c2 == 'H') return make_key(KIND_HOME, "");
         if (c2 == 'F') return make_key(KIND_END, "");
     }
@@ -229,6 +274,7 @@ read_key_win(int timeout_ms)
     for (;;) {
         if (_kbhit()) {
             int c = _getwch();
+            PyObject *ck;
             if (c == 0 || c == 0xE0) {
                 int c2 = _getwch();
                 switch (c2) {
@@ -239,6 +285,8 @@ read_key_win(int timeout_ms)
                 case 71: return make_key(KIND_HOME, "");
                 case 79: return make_key(KIND_END, "");
                 case 83: return make_key(KIND_DELETE, "");
+                case 115: return make_key(KIND_WORD_LEFT, "");  /* Ctrl+Left */
+                case 116: return make_key(KIND_WORD_RIGHT, ""); /* Ctrl+Right */
                 default: return make_key(KIND_CHAR, "");
                 }
             }
@@ -254,11 +302,9 @@ read_key_win(int timeout_ms)
             if (c == '\t') {
                 return make_key(KIND_TAB, "");
             }
-            if (c == 3) {
-                return make_key(KIND_CTRL_C, "");
-            }
-            if (c == 4) {
-                return make_key(KIND_CTRL_D, "");
+            ck = ctrl_key(c);
+            if (ck) {
+                return ck;
             }
             if (c >= 32) {
                 char utf8[8];
@@ -326,27 +372,44 @@ read_byte(int fd, char *out, int timeout_ms)
 static PyObject *
 decode_ansi(int fd)
 {
-    char buf[8];
+    char buf[16];
     int n = 0;
     int i;
 
-    for (i = 0; i < 6; i++) {
+    for (i = 0; i < 14; i++) {
         char c;
         int got = read_byte(fd, &c, 25);
         if (got <= 0) {
             break;
         }
         buf[n++] = c;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '~') {
+            break;
+        }
     }
     buf[n] = '\0';
-    if (n >= 2 && buf[0] == '[') {
-        if (buf[1] == 'A') return make_key(KIND_UP, "");
-        if (buf[1] == 'B') return make_key(KIND_DOWN, "");
-        if (buf[1] == 'C') return make_key(KIND_RIGHT, "");
-        if (buf[1] == 'D') return make_key(KIND_LEFT, "");
-        if (buf[1] == 'H') return make_key(KIND_HOME, "");
-        if (buf[1] == 'F') return make_key(KIND_END, "");
-        if (n >= 3 && buf[1] == '3' && buf[2] == '~') return make_key(KIND_DELETE, "");
+    if (n >= 1 && buf[0] == '[') {
+        const char *seq = buf + 1;
+        int sn = n - 1;
+        if (sn == 1) {
+            if (seq[0] == 'A') return make_key(KIND_UP, "");
+            if (seq[0] == 'B') return make_key(KIND_DOWN, "");
+            if (seq[0] == 'C') return make_key(KIND_RIGHT, "");
+            if (seq[0] == 'D') return make_key(KIND_LEFT, "");
+            if (seq[0] == 'H') return make_key(KIND_HOME, "");
+            if (seq[0] == 'F') return make_key(KIND_END, "");
+        }
+        if (sn >= 2 && seq[0] == '3' && seq[sn - 1] == '~') {
+            return make_key(KIND_DELETE, "");
+        }
+        if (sn >= 4 && strchr(seq, ';') && (seq[sn - 1] == 'C' || seq[sn - 1] == 'D')) {
+            if (strstr(seq, ";5")) {
+                if (seq[sn - 1] == 'C') return make_key(KIND_WORD_RIGHT, "");
+                return make_key(KIND_WORD_LEFT, "");
+            }
+            if (seq[sn - 1] == 'C') return make_key(KIND_RIGHT, "");
+            return make_key(KIND_LEFT, "");
+        }
     }
     if (n >= 2 && buf[0] == 'O') {
         if (buf[1] == 'H') return make_key(KIND_HOME, "");
@@ -362,6 +425,7 @@ read_key_posix(int timeout_ms)
     int got;
     int fd = STDIN_FILENO;
     char tmp[8];
+    PyObject *ck;
 
     if (!g_raw) {
         PyObject *r = xrk_enter_raw(NULL, NULL);
@@ -376,23 +440,20 @@ read_key_posix(int timeout_ms)
         return PyErr_SetFromErrno(PyExc_OSError);
     }
     if (got == 0) {
-        if (timeout_ms < 0) {
-            /* 继续短轮询，让 Python 能跑 stop_check */
-            Py_RETURN_NONE;
-        }
         Py_RETURN_NONE;
     }
 
     if (ch == '\r' || ch == '\n') return make_key(KIND_ENTER, "");
     if (ch == 127 || ch == 8) return make_key(KIND_BACKSPACE, "");
     if (ch == '\t') return make_key(KIND_TAB, "");
-    if (ch == 3) return make_key(KIND_CTRL_C, "");
-    if (ch == 4) return make_key(KIND_CTRL_D, "");
+    ck = ctrl_key((unsigned char)ch);
+    if (ck) {
+        return ck;
+    }
     if (ch == 0x1b) return decode_ansi(fd);
 
     tmp[0] = ch;
     tmp[1] = '\0';
-    /* 简易 UTF-8 续读 */
     if ((unsigned char)ch >= 0xC0) {
         int need = ((unsigned char)ch < 0xE0) ? 1 : ((unsigned char)ch < 0xF0) ? 2 : 3;
         int i;

@@ -1,4 +1,4 @@
-"""POSIX 控制台：termios cbreak + ANSI。"""
+"""POSIX 控制台：termios cbreak + ANSI / Ctrl。"""
 
 from __future__ import annotations
 
@@ -10,17 +10,51 @@ from typing import Optional
 
 from .keys import Key, KeyEvent
 
-_CSI = {
-    "[A": Key.UP,
-    "[B": Key.DOWN,
-    "[C": Key.RIGHT,
-    "[D": Key.LEFT,
-    "[H": Key.HOME,
-    "[F": Key.END,
-    "[3~": Key.DELETE,
-    "OH": Key.HOME,
-    "OF": Key.END,
+_CTRL = {
+    "\x01": Key.CTRL_A,
+    "\x05": Key.CTRL_E,
+    "\x0b": Key.CTRL_K,
+    "\x15": Key.CTRL_U,
+    "\x17": Key.CTRL_W,
+    "\x0c": Key.CTRL_L,
+    "\x19": Key.CTRL_Y,
+    "\x03": Key.CTRL_C,
+    "\x04": Key.CTRL_D,
 }
+
+
+def _csi_kind(seq: str) -> Optional[str]:
+    if not seq:
+        return None
+    simple = {
+        "A": Key.UP,
+        "B": Key.DOWN,
+        "C": Key.RIGHT,
+        "D": Key.LEFT,
+        "H": Key.HOME,
+        "F": Key.END,
+        "3~": Key.DELETE,
+    }
+    if seq in simple:
+        return simple[seq]
+    if seq.endswith("~") and seq.startswith("3"):
+        return Key.DELETE
+    if ";" in seq and seq[-1] in "ABCDHF":
+        parts = seq[:-1].split(";")
+        mod = parts[-1] if len(parts) > 1 else ""
+        final = seq[-1]
+        ctrl = "5" in mod
+        if final == "C":
+            return Key.WORD_RIGHT if ctrl else Key.RIGHT
+        if final == "D":
+            return Key.WORD_LEFT if ctrl else Key.LEFT
+        return {
+            "A": Key.UP,
+            "B": Key.DOWN,
+            "H": Key.HOME,
+            "F": Key.END,
+        }.get(final)
+    return None
 
 
 class PosixConsole:
@@ -65,10 +99,9 @@ class PosixConsole:
             return KeyEvent(Key.BACKSPACE)
         if ch == "\t":
             return KeyEvent(Key.TAB)
-        if ch == "\x03":
-            return KeyEvent(Key.CTRL_C)
-        if ch == "\x04":
-            return KeyEvent(Key.CTRL_D)
+        ctrl = _CTRL.get(ch)
+        if ctrl:
+            return KeyEvent(ctrl)
         if ch == "\x1b":
             return self._ansi(fd)
         if ch.isprintable():
@@ -76,13 +109,30 @@ class PosixConsole:
         return KeyEvent(Key.CHAR, "")
 
     def _ansi(self, fd: int) -> KeyEvent:
-        seq = ""
-        for _ in range(6):
-            ready, _, _ = select.select([fd], [], [], 0.025)
-            if not ready:
-                break
-            seq += sys.stdin.read(1)
-            for key, kind in _CSI.items():
-                if seq == key or seq.startswith(key):
-                    return KeyEvent(kind)
+        n1 = self._read_ch(fd, 0.04)
+        if not n1:
+            return KeyEvent(Key.CHAR, "")
+        if n1 == "[":
+            seq = ""
+            for _ in range(12):
+                c = self._read_ch(fd, 0.04)
+                if not c:
+                    break
+                seq += c
+                if c.isalpha() or c == "~":
+                    break
+            kind = _csi_kind(seq)
+            return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
+        if n1 == "O":
+            n2 = self._read_ch(fd, 0.04)
+            if n2 == "H":
+                return KeyEvent(Key.HOME)
+            if n2 == "F":
+                return KeyEvent(Key.END)
         return KeyEvent(Key.CHAR, "")
+
+    def _read_ch(self, fd: int, timeout: float) -> str:
+        ready, _, _ = select.select([fd], [], [], timeout)
+        if not ready:
+            return ""
+        return sys.stdin.read(1)
