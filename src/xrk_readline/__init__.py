@@ -4,4 +4,4 @@ from .console import backend_name
 from .editor import Readline
 
 __all__ = ["Readline", "backend_name"]
-__version__ = "0.2.2"
+__version__ = "0.2.3"

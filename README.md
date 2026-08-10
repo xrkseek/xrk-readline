@@ -5,7 +5,6 @@
 
 - 仓库：[github.com/xrkseek/xrk-readline](https://github.com/xrkseek/xrk-readline)
 - PyPI：[pypi.org/project/xrk-readline](https://pypi.org/project/xrk-readline/)
-- 文档：[xrkseek.github.io/xrk-readline](https://xrkseek.github.io/xrk-readline/)
 
 ## 安装
 

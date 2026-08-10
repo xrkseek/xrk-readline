@@ -131,8 +131,9 @@ class WinConsole:
         ctrl = _CTRL.get(ch)
         if ctrl:
             return KeyEvent(ctrl)
-        if ch in ("\x00", "\xe0"):
-            code = self._read_more(0.05) or ""
+        # 功能键前缀后必有第二码；禁止短超时，否则会把 H/P 当字符打出
+        if ch in ("\x00", "\xe0") or ord(ch) in (0, 0xE0):
+            code = msvcrt.getwch()
             kind = _LEGACY.get(code)
             return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
         if ch == "\x1b":
