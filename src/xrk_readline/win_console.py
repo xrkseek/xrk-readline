@@ -1,4 +1,4 @@
-"""Windows 控制台：msvcrt + ANSI / Ctrl 组合键。"""
+"""Windows 控制台输入。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ _CTRL = {
     "\x04": Key.CTRL_D,
 }
 
-# 传统功能键第二码
 _LEGACY = {
     "H": Key.UP,
     "P": Key.DOWN,
@@ -34,8 +33,8 @@ _LEGACY = {
     "G": Key.HOME,
     "O": Key.END,
     "S": Key.DELETE,
-    "s": Key.WORD_LEFT,   # Ctrl+Left
-    "t": Key.WORD_RIGHT,  # Ctrl+Right
+    "s": Key.WORD_LEFT,
+    "t": Key.WORD_RIGHT,
 }
 
 
@@ -54,43 +53,30 @@ def _ensure_vt() -> None:
 
 
 def _csi_kind(seq: str) -> Optional[str]:
-    """解析 CSI 终字节序列，如 A / 1;5D / 3~。"""
     if not seq:
         return None
-    if seq in ("A",):
-        return Key.UP
-    if seq in ("B",):
-        return Key.DOWN
-    if seq in ("C",):
-        return Key.RIGHT
-    if seq in ("D",):
-        return Key.LEFT
-    if seq in ("H",):
-        return Key.HOME
-    if seq in ("F",):
-        return Key.END
-    if seq.endswith("~"):
-        if seq.startswith("3"):
-            return Key.DELETE
-        return None
-    # modifier: 1;5C = Ctrl+Right
+    simple = {
+        "A": Key.UP,
+        "B": Key.DOWN,
+        "C": Key.RIGHT,
+        "D": Key.LEFT,
+        "H": Key.HOME,
+        "F": Key.END,
+    }
+    if seq in simple:
+        return simple[seq]
+    if seq.endswith("~") and seq.startswith("3"):
+        return Key.DELETE
     if ";" in seq and seq[-1] in "ABCDHF":
         parts = seq[:-1].split(";")
         mod = parts[-1] if len(parts) > 1 else ""
         final = seq[-1]
-        ctrl = mod == "5" or mod.endswith("5")
+        ctrl = "5" in mod
         if final == "C":
             return Key.WORD_RIGHT if ctrl else Key.RIGHT
         if final == "D":
             return Key.WORD_LEFT if ctrl else Key.LEFT
-        if final == "A":
-            return Key.UP
-        if final == "B":
-            return Key.DOWN
-        if final == "H":
-            return Key.HOME
-        if final == "F":
-            return Key.END
+        return simple.get(final)
     return None
 
 
@@ -131,10 +117,8 @@ class WinConsole:
         ctrl = _CTRL.get(ch)
         if ctrl:
             return KeyEvent(ctrl)
-        # 功能键前缀后必有第二码；禁止短超时，否则会把 H/P 当字符打出
-        if ch in ("\x00", "\xe0") or ord(ch) in (0, 0xE0):
-            code = msvcrt.getwch()
-            kind = _LEGACY.get(code)
+        if ch in ("\x00", "\xe0"):
+            kind = _LEGACY.get(msvcrt.getwch())
             return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
         if ch == "\x1b":
             return self._ansi()

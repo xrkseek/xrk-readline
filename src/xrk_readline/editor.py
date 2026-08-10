@@ -1,4 +1,4 @@
-"""行编辑核心（体验向：词跳转、杀行、折行重绘、yank）。"""
+"""行编辑。"""
 
 from __future__ import annotations
 
@@ -38,8 +38,6 @@ def _word_right(buf: List[str], pos: int) -> int:
 
 
 class Readline:
-    """行编辑：C 控制台后端（或纯 Python 回退）+ Python 编辑逻辑。"""
-
     def __init__(self, *, history_size: int = 500) -> None:
         self._history = History(history_size)
         self._completer: Optional[Completer] = None
@@ -67,7 +65,7 @@ class Readline:
         self._stop_check = fn
 
     def parse_and_bind(self, _line: str) -> None:
-        """兼容 GNU readline 调用点。"""
+        pass
 
     def readline(self, prompt: str = "") -> str:
         if not sys.stdin.isatty() or not sys.stdout.isatty():
@@ -283,13 +281,11 @@ class Readline:
         cur_w = text_width(prompt) + text_width(text[:pos])
         rows = rows_for(total_w, cols)
 
-        # 回到输入块左上角并清到屏尾，避免长行折行残影
         if prev_rows > 1:
             self._console.write(f"\x1b[{prev_rows - 1}A")
         self._console.write("\r\x1b[J")
         self._console.write(prompt + text)
 
-        # 写完后光标在 total_w；挪到 cur_w
         er, ec = xy_for(total_w, cols)
         tr, tc = xy_for(cur_w, cols)
         if er > tr:

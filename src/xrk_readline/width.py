@@ -1,4 +1,4 @@
-"""终端显示宽度与光标几何（含 CJK / 折行）。"""
+"""显示宽度与折行几何。"""
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ def char_width(ch: str) -> int:
         return 0
     if unicodedata.combining(ch):
         return 0
-    eaw = unicodedata.east_asian_width(ch)
-    if eaw in ("F", "W"):
+    if unicodedata.east_asian_width(ch) in ("F", "W"):
         return 2
     if ord(ch) >= 0x1F300:
         return 2
@@ -37,7 +36,6 @@ def rows_for(width: int, cols: int) -> int:
 
 
 def xy_for(offset: int, cols: int) -> tuple[int, int]:
-    """显示列 offset 对应的 (row, col)，从块左上角起算。"""
     if offset <= 0 or cols <= 0:
         return 0, 0
     return offset // cols, offset % cols

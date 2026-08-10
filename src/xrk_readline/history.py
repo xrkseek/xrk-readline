@@ -1,4 +1,4 @@
-"""历史记录：上下键在草稿与条目间来回切换。"""
+"""历史记录。"""
 
 from __future__ import annotations
 
@@ -7,10 +7,7 @@ from typing import List, Optional
 
 
 class History:
-    """
-    索引模型：``_idx`` ∈ [0, len(items)]，``_idx == len`` 表示当前草稿。
-    上下键只移动索引；到头/到尾再按返回 None（缓冲区不变）。
-    """
+    """``_idx == len(items)`` 为草稿槽；↑↓ 在条目与草稿间移动。"""
 
     def __init__(self, max_len: int = 500) -> None:
         self._max = max(1, int(max_len))
@@ -29,7 +26,6 @@ class History:
         self.reset_nav()
 
     def reset_nav(self) -> None:
-        """结束浏览，回到草稿槽（不改 items）。"""
         self._nav = False
         self._draft = ""
         self._idx = len(self._items)
@@ -43,7 +39,6 @@ class History:
         self.reset_nav()
 
     def older(self, current: str) -> Optional[str]:
-        """↑ 更旧；已在最旧返回 None。"""
         if not self._items:
             return None
         if not self._nav:
@@ -56,7 +51,6 @@ class History:
         return self._items[self._idx]
 
     def newer(self, current: str) -> Optional[str]:
-        """↓ 更新；已在草稿返回 None。"""
         if not self._nav:
             return None
         if self._idx >= len(self._items):

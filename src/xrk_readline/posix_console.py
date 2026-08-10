@@ -1,4 +1,4 @@
-"""POSIX 控制台：termios cbreak + ANSI / Ctrl。"""
+"""POSIX 控制台。"""
 
 from __future__ import annotations
 

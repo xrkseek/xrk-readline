@@ -1,4 +1,4 @@
-"""优先使用 C 扩展控制台；无编译产物时回退纯 Python。"""
+"""控制台后端：优先 C 扩展。"""
 
 from __future__ import annotations
 
@@ -33,8 +33,6 @@ def backend_name() -> str:
 
 
 class NativeConsole:
-    """包装 xrk_readline._native（C）。"""
-
     def __init__(self, native) -> None:
         self._n = native
         self._raw = 0
