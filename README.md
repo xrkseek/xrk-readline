@@ -5,43 +5,77 @@
 
 仓库：[github.com/sunflowermm/xrk-readline](https://github.com/sunflowermm/xrk-readline)
 
-## 用户怎么装（推荐：从 Git 拉）
+## 安装
 
-当前以 GitHub 为分发源（尚未上 PyPI 时用这个）：
+### PyPI（正式 pip 源，发布后）
 
 ```bash
-# HTTPS
-pip install "git+https://github.com/sunflowermm/xrk-readline.git"
-
-# SSH
-pip install "git+ssh://git@github.com/sunflowermm/xrk-readline.git"
-
-# 钉版本 / 分支
-pip install "git+https://github.com/sunflowermm/xrk-readline.git@main"
-pip install "git+https://github.com/sunflowermm/xrk-readline.git@v0.2.0"
-
-# uv
-uv pip install "git+https://github.com/sunflowermm/xrk-readline.git"
-
-# 强制纯 Python（不编 C 扩展）
-XRK_READLINE_PURE=1 pip install "git+https://github.com/sunflowermm/xrk-readline.git"
+pip install xrk-readline
+# 或
+uv pip install xrk-readline
 ```
-
-`pyproject.toml` / `requirements.txt`：
 
 ```toml
 # pyproject.toml
-dependencies = [
-  "xrk-readline @ git+https://github.com/sunflowermm/xrk-readline.git",
-]
+dependencies = ["xrk-readline>=0.2.0"]
 ```
 
-```text
-# requirements.txt
-xrk-readline @ git+https://github.com/sunflowermm/xrk-readline.git
+### 还没上 PyPI 时：从 Git 拉
+
+```bash
+pip install "git+https://github.com/sunflowermm/xrk-readline.git"
 ```
 
-开发者本地：
+## 发布到 PyPI（你要当 pip 源时做这些）
+
+Pages / GitHub 本身**不能**当 `pip install 包名` 的官方源。正式源是 [pypi.org](https://pypi.org)。
+
+### 1. 注册
+
+1. 打开 https://pypi.org/account/register/ 注册并验证邮箱  
+2. （建议）https://test.pypi.org 先练手  
+
+### 2. 配置 Trusted Publisher（推荐，免 API Token）
+
+1. 登录 PyPI → **Your projects** → **Publishing** / 或首次上传前用  
+   https://pypi.org/manage/account/publishing/  
+2. **Add a new pending publisher**：
+   - PyPI project name: `xrk-readline`
+   - Owner: `sunflowermm`
+   - Repository: `xrk-readline`
+   - Workflow name: `publish.yml`
+   - Environment name: `pypi`
+3. 在 GitHub 仓库 **Settings → Environments** 新建环境名：`pypi`（可加审批）
+
+### 3. 发版
+
+```bash
+# 版本与 pyproject.toml 的 version 一致，例如 0.2.0
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+或在 GitHub 点 **Release** 创建 `v0.2.0`。  
+Actions 里的 `publish` 会构建 **纯 Python wheel + sdist** 并上传 PyPI。  
+（C 扩展留给本机有编译器时从源码编；首发先保证全平台 `pip install` 能装上。）
+
+### 4. 验证
+
+```bash
+pip index versions xrk-readline
+pip install xrk-readline==0.2.0
+python -c "from xrk_readline import backend_name; print(backend_name())"
+```
+
+本地手动上传（不推荐，不如 Trusted Publisher）：
+
+```bash
+pip install build twine
+XRK_READLINE_PURE=1 python -m build
+twine upload dist/*   # 需 PyPI API token
+```
+
+## 开发者本地
 
 ```bash
 git clone git@github.com:sunflowermm/xrk-readline.git
@@ -90,16 +124,13 @@ except EOFError:
 
 ## GitHub Pages？
 
-**Pages 适合放文档站，不适合当 pip 源。**
+**Pages = 文档站**（安装说明页），**不是** pip 源。
 
-| 方式 | 用途 |
-|------|------|
-| `pip install git+https://...` | **拉代码安装**（推荐现在就用） |
-| [PyPI](https://pypi.org) | `pip install xrk-readline`（需你上传 wheel/sdist） |
-| GitHub Pages | 说明页 / API 文档；用户仍用上面命令安装 |
-
-本仓 `docs/` 可开 Pages 展示安装说明；安装命令仍写 `git+https://...`。
-
+| 方式 | 用户命令 |
+|------|----------|
+| **PyPI** | `pip install xrk-readline` |
+| Git 直装 | `pip install "git+https://github.com/sunflowermm/xrk-readline.git"` |
+| Pages | 只能看网页，不能当包索引 |
 ## License
 
 MIT
