@@ -77,6 +77,16 @@ def test_win_legacy_arrow_waits() -> None:
     assert s.poll(now=3.0).kind == Key.DOWN
 
 
+def test_history_skips_same_as_current() -> None:
+    from xrk_readline.history import History
+
+    h = History()
+    h.add("a")
+    h.add("b")
+    # 当前已是最新历史时，一下 ↑ 应跳到更旧的 a
+    assert h.older("b") == "a"
+
+
 if __name__ == "__main__":
     test_tables()
     test_utf8_chinese()
@@ -84,6 +94,6 @@ if __name__ == "__main__":
     test_csi_and_orphan()
     test_literal_bracket()
     test_win_enter_not_swallowed_by_xe0()
-    test_win_legacy_arrow()
     test_win_legacy_arrow_waits()
+    test_history_skips_same_as_current()
     print("ok")

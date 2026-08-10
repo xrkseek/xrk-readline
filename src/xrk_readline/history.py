@@ -43,21 +43,24 @@ class History:
             self._draft = current
             self._nav = True
             self._idx = len(self._items)
-        if self._idx <= 0:
-            return None
-        self._idx -= 1
-        return self._items[self._idx]
+        # 跳过与当前行相同的条目，避免「看起来要按两下才切换」
+        while self._idx > 0:
+            self._idx -= 1
+            if self._items[self._idx] != current:
+                return self._items[self._idx]
+        return None
 
     def newer(self, current: str) -> Optional[str]:
         if not self._nav:
             return None
-        if self._idx >= len(self._items):
-            return None
-        self._idx += 1
-        if self._idx >= len(self._items):
-            self._idx = len(self._items)
-            return self._draft
-        return self._items[self._idx]
+        while self._idx < len(self._items):
+            self._idx += 1
+            if self._idx >= len(self._items):
+                self._idx = len(self._items)
+                return self._draft
+            if self._items[self._idx] != current:
+                return self._items[self._idx]
+        return None
 
     def load(self, path: str | Path) -> None:
         p = Path(path)
