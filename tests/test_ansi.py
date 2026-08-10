@@ -52,10 +52,32 @@ def test_literal_bracket() -> None:
     assert ev is not None and ev.char == "["
 
 
+def test_win_enter_not_swallowed_by_xe0() -> None:
+    """IME 残留 \\xe0 后按回车，不得把 \\r 当扫描码吃掉。"""
+    s = KeyStream()
+    s.push("\xe0")
+    s.push("\r")
+    # 先丢掉 \\xe0
+    assert s.poll(now=1.0) is None
+    ev = s.poll(now=1.0)
+    assert ev is not None and ev.kind == Key.ENTER
+
+
+def test_win_legacy_arrow() -> None:
+    s = KeyStream()
+    s.push("\xe0")
+    assert s.poll(now=1.0) is None
+    s.push("H")
+    ev = s.poll(now=1.1)
+    assert ev is not None and ev.kind == Key.UP
+
+
 if __name__ == "__main__":
     test_tables()
     test_utf8_chinese()
     test_utf8_split_packets()
     test_csi_and_orphan()
     test_literal_bracket()
+    test_win_enter_not_swallowed_by_xe0()
+    test_win_legacy_arrow()
     print("ok")
