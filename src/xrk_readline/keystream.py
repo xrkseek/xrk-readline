@@ -1,4 +1,4 @@
-"""按键流：跨 poll 挂起未完成序列；兼容 SSH/xterm 吞掉 ESC 只剩 [A 的情况。"""
+"""按键流：ESC/CSI/SS3 挂起；POSIX UTF-8 字节拼成 Unicode；孤儿 [A 恢复。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import List, Optional
 
 from .keys import Key, KeyEvent
 
-# 单独 ESC 等待；半截 CSI 更长，超时整段丢弃（不漏成字符）
 ESC_WAIT = 1.0
 CSI_STUCK = 2.5
 
@@ -75,26 +74,61 @@ def ss3_kind(ch: str) -> Optional[str]:
     return _ARROWS.get(ch)
 
 
+def _utf8_need(lead: int) -> int:
+    if lead < 0x80:
+        return 1
+    if lead < 0xC2 or lead > 0xF4:
+        return 0
+    if lead < 0xE0:
+        return 2
+    if lead < 0xF0:
+        return 3
+    return 4
+
+
 class KeyStream:
     def __init__(self) -> None:
         self._q: List[str] = []
+        self._utf8 = bytearray()
         self._hold_at: Optional[float] = None
 
     @property
     def pending(self) -> bool:
-        return bool(self._q)
+        return bool(self._q) or bool(self._utf8)
 
     def clear(self) -> None:
         self._q.clear()
+        self._utf8.clear()
         self._hold_at = None
 
     def push(self, ch: str) -> None:
+        """已是 Unicode 字符（Windows getwch）。"""
         if ch:
             self._q.append(ch)
 
     def push_bytes(self, data: bytes) -> None:
-        if data:
-            self._q.extend(data.decode("latin-1"))
+        """原始字节（POSIX os.read）：按 UTF-8 拼成字符再入队。"""
+        if not data:
+            return
+        self._utf8.extend(data)
+        while self._utf8:
+            lead = self._utf8[0]
+            # 控制/ASCII：直接出队（含 ESC）
+            if lead < 0x80:
+                self._q.append(chr(self._utf8.pop(0)))
+                continue
+            need = _utf8_need(lead)
+            if need < 2:
+                self._utf8.pop(0)
+                continue
+            if len(self._utf8) < need:
+                break
+            raw = bytes(self._utf8[:need])
+            try:
+                self._q.append(raw.decode("utf-8"))
+                del self._utf8[:need]
+            except UnicodeDecodeError:
+                self._utf8.pop(0)
 
     def poll(self, now: Optional[float] = None) -> Optional[KeyEvent]:
         now = time.monotonic() if now is None else now
@@ -105,7 +139,7 @@ class KeyStream:
         head = self._q[0]
         if head == "\x1b":
             return self._poll_esc(now)
-        if head in ("\x00", "\xe0"):
+        if len(head) == 1 and head in ("\x00", "\xe0"):
             return self._poll_win_legacy()
 
         orphan = self._poll_orphan_arrow()
@@ -122,10 +156,11 @@ class KeyStream:
             return KeyEvent(Key.BACKSPACE)
         if ch == "\t":
             return KeyEvent(Key.TAB)
-        ctrl = CTRL.get(ch)
-        if ctrl:
-            return KeyEvent(ctrl)
-        if ch.isprintable() or ord(ch) > 127:
+        if len(ch) == 1:
+            ctrl = CTRL.get(ch)
+            if ctrl:
+                return KeyEvent(ctrl)
+        if ch.isprintable() or (len(ch) == 1 and ord(ch) > 127) or len(ch) > 1:
             return KeyEvent(Key.CHAR, ch)
         return KeyEvent(Key.CHAR, "")
 
@@ -152,24 +187,23 @@ class KeyStream:
             if len(self._q) == 1:
                 return True
             for c in self._q[1:]:
+                if len(c) != 1:
+                    return False
                 if c.isalpha() or c == "~":
                     return False
                 if c not in "0123456789;?":
                     return False
             return True
-        if self._q[0] == "O":
-            return len(self._q) == 1
-        return False
+        return self._q[0] == "O" and len(self._q) == 1
 
     def _poll_orphan_arrow(self) -> Optional[KeyEvent]:
-        """无 ESC 的 CSI/SS3 残片（ConPTY / 部分 SSH）。"""
         if not self._q:
             return None
         if self._q[0] == "[":
             end = None
             for i in range(1, min(len(self._q), 16)):
                 c = self._q[i]
-                if c.isalpha() or c == "~":
+                if len(c) == 1 and (c.isalpha() or c == "~"):
                     end = i
                     break
             if end is None:
@@ -180,7 +214,7 @@ class KeyStream:
                 return None
             self._drop_prefix(end + 1)
             return KeyEvent(kind)
-        if self._q[0] == "O" and len(self._q) >= 2:
+        if self._q[0] == "O" and len(self._q) >= 2 and len(self._q[1]) == 1:
             kind = ss3_kind(self._q[1])
             if kind is None:
                 return None
@@ -201,7 +235,6 @@ class KeyStream:
         self._begin_hold(now)
         age = self._age(now)
 
-        # ESC ESC… → 折叠为一个 ESC
         while len(self._q) >= 2 and self._q[0] == "\x1b" and self._q[1] == "\x1b":
             self._q.pop(0)
 
@@ -215,12 +248,11 @@ class KeyStream:
             end = None
             for i in range(2, len(self._q)):
                 c = self._q[i]
-                if c.isalpha() or c == "~":
+                if len(c) == 1 and (c.isalpha() or c == "~"):
                     end = i
                     break
             if end is None:
                 if age >= CSI_STUCK:
-                    # 半截 CSI：整段丢掉，绝不把 [ 打进行缓冲
                     self._q.clear()
                     self._hold_at = None
                 return None
@@ -237,9 +269,8 @@ class KeyStream:
                 return None
             ch = self._q[2]
             self._drop_prefix(3)
-            kind = ss3_kind(ch)
+            kind = ss3_kind(ch) if len(ch) == 1 else None
             return KeyEvent(kind) if kind else KeyEvent(Key.CHAR, "")
 
-        # ESC + 普通字符：当作 Alt，忽略修饰，保留后续字符
         self._drop_head()
         return None
